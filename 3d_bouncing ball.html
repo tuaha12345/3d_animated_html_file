@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Bouncing Ball with Blast</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        .info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 10;
+        }
+        button {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #ff5252;
+        }
+    </style>
+</head>
+<body>
+    <div class="info">
+        <h3>3D Bouncing Ball</h3>
+        <p>Watch the ball bounce, come forward, and BLAST!</p>
+        <button onclick="restartAnimation()">Restart</button>
+    </div>
+    <div id="canvas-container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, ball, plane;
+        let particles = [];
+        let animationId;
+        let time = 0;
+        let phase = 'bouncing';
+        let velocity = 0;
+        const gravity = -0.015;
+        const bounceDecay = 0.8;
+        let bounceCount = 0;
+        let scale = 1;
+        let blastTime = 0;
+
+        function init() {
+            // Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a15);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(
+                75,
+                window.innerWidth / window.innerHeight,
+                0.1,
+                1000
+            );
+            camera.position.set(0, 0, 5);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const pointLight = new THREE.PointLight(0xffffff, 1.5);
+            pointLight.position.set(5, 5, 5);
+            scene.add(pointLight);
+
+            const pointLight2 = new THREE.PointLight(0xff6b6b, 0.8);
+            pointLight2.position.set(-5, 3, 2);
+            scene.add(pointLight2);
+
+            // Create ball
+            const geometry = new THREE.SphereGeometry(0.5, 32, 32);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0xff6b6b,
+                metalness: 0.5,
+                roughness: 0.3,
+                emissive: 0xff3333,
+                emissiveIntensity: 0.2
+            });
+            ball = new THREE.Mesh(geometry, material);
+            ball.position.set(0, 2, -3);
+            scene.add(ball);
+
+            // Create ground plane
+            const planeGeometry = new THREE.PlaneGeometry(15, 15);
+            const planeMaterial = new THREE.MeshStandardMaterial({
+                color: 0x1a1a2e,
+                side: THREE.DoubleSide,
+            });
+            plane = new THREE.Mesh(planeGeometry, planeMaterial);
+            plane.rotation.x = Math.PI / 2;
+            plane.position.y = -2;
+            scene.add(plane);
+
+            // Add grid to plane
+            const gridHelper = new THREE.GridHelper(15, 15, 0x444466, 0x222233);
+            gridHelper.position.y = -1.99;
+            scene.add(gridHelper);
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Start animation
+            animate();
+        }
+
+        function createBlastParticles() {
+            const particleCount = 50;
+            const particleGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+            
+            for (let i = 0; i < particleCount; i++) {
+                const colors = [0xff6b6b, 0xff9f1c, 0xffdd00, 0xff3333, 0xffa500];
+                const color = colors[Math.floor(Math.random() * colors.length)];
+                
+                const particleMaterial = new THREE.MeshStandardMaterial({
+                    color: color,
+                    emissive: color,
+                    emissiveIntensity: 0.5
+                });
+                
+                const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+                particle.position.copy(ball.position);
+                
+                // Random velocity in all directions
+                const angle = Math.random() * Math.PI * 2;
+                const elevation = Math.random() * Math.PI - Math.PI / 2;
+                const speed = 0.1 + Math.random() * 0.2;
+                
+                particle.velocity = {
+                    x: Math.cos(angle) * Math.cos(elevation) * speed,
+                    y: Math.sin(elevation) * speed + 0.1,
+                    z: Math.sin(angle) * Math.cos(elevation) * speed
+                };
+                
+                particle.life = 1.0;
+                scene.add(particle);
+                particles.push(particle);
+            }
+        }
+
+        function animate() {
+            animationId = requestAnimationFrame(animate);
+            time += 0.016;
+
+            // Rotate ball
+            ball.rotation.x += 0.03;
+            ball.rotation.y += 0.02;
+
+            if (phase === 'bouncing') {
+                // Bouncing physics
+                velocity += gravity;
+                ball.position.y += velocity;
+
+                // Check ground collision
+                if (ball.position.y <= -1.5) {
+                    ball.position.y = -1.5;
+                    velocity = -velocity * bounceDecay;
+                    bounceCount++;
+
+                    // After 6 bounces, start coming forward
+                    if (bounceCount >= 6) {
+                        phase = 'approaching';
+                        velocity = 0.1;
+                    }
+                }
+            } else if (phase === 'approaching') {
+                // Move ball forward (toward camera) and grow
+                ball.position.z += 0.08;
+                scale += 0.03;
+                ball.scale.set(scale, scale, scale);
+
+                // Small bounce while approaching
+                ball.position.y += velocity;
+                velocity += gravity * 0.3;
+
+                if (ball.position.y <= -1.5) {
+                    ball.position.y = -1.5;
+                    velocity = 0.1;
+                }
+
+                // Increase glow as it approaches
+                ball.material.emissiveIntensity = Math.min(1.0, 0.2 + scale * 0.2);
+
+                // When close enough and big enough, blast!
+                if (ball.position.z >= 3 && scale >= 2.5) {
+                    phase = 'blasting';
+                    createBlastParticles();
+                    ball.visible = false;
+                }
+            } else if (phase === 'blasting') {
+                blastTime += 0.016;
+                
+                // Animate particles
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    
+                    // Update position
+                    p.position.x += p.velocity.x;
+                    p.position.y += p.velocity.y;
+                    p.position.z += p.velocity.z;
+                    
+                    // Apply gravity to particles
+                    p.velocity.y -= 0.005;
+                    
+                    // Fade out
+                    p.life -= 0.015;
+                    p.material.opacity = p.life;
+                    p.material.transparent = true;
+                    p.scale.set(p.life, p.life, p.life);
+                    
+                    // Remove dead particles
+                    if (p.life <= 0) {
+                        scene.remove(p);
+                        particles.splice(i, 1);
+                    }
+                }
+
+                // Reset after blast animation completes
+                if (blastTime > 3 && particles.length === 0) {
+                    setTimeout(restartAnimation, 1000);
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function restartAnimation() {
+            // Remove all particles
+            particles.forEach(p => scene.remove(p));
+            particles = [];
+
+            // Reset all variables
+            time = 0;
+            phase = 'bouncing';
+            velocity = 0;
+            bounceCount = 0;
+            scale = 1;
+            blastTime = 0;
+
+            // Reset ball properties
+            ball.position.set(0, 2, -3);
+            ball.scale.set(1, 1, 1);
+            ball.material.opacity = 1;
+            ball.material.transparent = false;
+            ball.material.emissiveIntensity = 0.2;
+            ball.visible = true;
+        }
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>
